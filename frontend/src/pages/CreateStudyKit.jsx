@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { studyService } from '../services/api';
 import { Button } from '../components/ui/Button';
-import { BookOpen, Check, ArrowRight, AlertCircle, FileText } from 'lucide-react';
+import { FileUploadZone } from '../components/ui/FileUploadZone';
+import { BookOpen, Check, ArrowRight, AlertCircle, FileText, Upload } from 'lucide-react';
 
 export function CreateStudyKit() {
   const navigate = useNavigate();
@@ -111,7 +112,7 @@ export function CreateStudyKit() {
           Create Study Kit
         </h1>
         <p className="text-sm text-[#172B3A]/70 mt-1">
-          Paste your lecture notes, textbook excerpts, or article text to transform them into an active revision workspace.
+          Drag and drop study documents or paste your lecture notes and textbook excerpts to build your revision kit.
         </p>
       </div>
 
@@ -177,11 +178,36 @@ export function CreateStudyKit() {
             />
           </div>
 
+          {/* DRAG AND DROP FILE UPLOAD AREA */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center">
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#172B3A] flex items-center gap-1.5">
+                <Upload className="w-3.5 h-3.5" />
+                Upload Files (Drag & Drop)
+              </label>
+              <span className="text-xs font-mono text-[#172B3A]/60">
+                Supports TXT, MD, PDF, DOCX, Code
+              </span>
+            </div>
+            <FileUploadZone
+              onFilesExtracted={(extractedText) => {
+                if (extractedText) {
+                  setNotes(extractedText);
+                }
+              }}
+              onTopicSuggested={(suggestedTitle) => {
+                if (!topic.trim()) {
+                  setTopic(suggestedTitle);
+                }
+              }}
+            />
+          </div>
+
           {/* Notes Textarea */}
           <div className="space-y-1.5">
             <div className="flex justify-between items-center">
               <label className="block text-xs font-bold uppercase tracking-wider text-[#172B3A]">
-                Class Notes / Material
+                Class Notes / Extracted Text
               </label>
               <span className="text-xs font-mono text-[#172B3A]/60">
                 Min 20 characters
@@ -192,7 +218,7 @@ export function CreateStudyKit() {
               required
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Paste your class notes, lecture summaries, or textbook paragraphs here..."
+              placeholder="Extracted file text will appear here. Or paste your class notes, lecture summaries, or textbook paragraphs..."
               className="w-full p-4 border-2 border-[#172B3A] rounded-md bg-[#FAF8F4] text-sm text-[#172B3A] leading-relaxed focus:outline-none focus:bg-[#F5F1E8] resize-y"
             />
           </div>

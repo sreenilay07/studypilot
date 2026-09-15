@@ -100,15 +100,33 @@ export function QuizPage() {
           </h2>
         </div>
 
-        <div className="text-right">
+        <div className="flex flex-col items-end gap-1.5">
           <span className="text-xs font-mono font-bold text-[#172B3A]">
             Question {currentIndex + 1} of {session.quiz.length}
           </span>
-          <div className="w-32 h-1.5 bg-[#172B3A]/15 rounded-full mt-1.5 overflow-hidden">
-            <div
-              className="h-full bg-[#172B3A] transition-all duration-300"
-              style={{ width: `${((currentIndex + 1) / session.quiz.length) * 100}%` }}
-            />
+          
+          {/* Question Navigation Pills */}
+          <div className="flex items-center gap-1">
+            {session.quiz.map((_, idx) => {
+              const isAnswered = Boolean(answers[idx]);
+              const isCurrent = idx === currentIndex;
+              return (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentIndex(idx)}
+                  className={`w-6 h-6 rounded text-[11px] font-mono font-bold border transition-all flex items-center justify-center ${
+                    isCurrent
+                      ? 'border-2 border-[#172B3A] bg-[#172B3A] text-[#F5F1E8]'
+                      : isAnswered
+                      ? 'border-[#172B3A]/40 bg-[#172B3A]/15 text-[#172B3A]'
+                      : 'border-[#172B3A]/20 bg-[#FAF8F4] text-[#172B3A]/40 hover:border-[#172B3A]'
+                  }`}
+                  title={`Question ${idx + 1}: ${isAnswered ? 'Answered' : 'Unanswered'}`}
+                >
+                  {idx + 1}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -166,9 +184,11 @@ export function QuizPage() {
           Previous
         </Button>
 
-        <span className="text-xs font-mono text-[#172B3A]/60">
-          {answeredCount} of {session.quiz.length} answered
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-mono text-[#172B3A]/60">
+            {answeredCount} of {session.quiz.length} answered
+          </span>
+        </div>
 
         {!isLast ? (
           <Button
@@ -183,7 +203,7 @@ export function QuizPage() {
             variant="primary"
             size="md"
             onClick={handleSubmitQuiz}
-            disabled={submitting || answeredCount < session.quiz.length}
+            disabled={submitting}
           >
             {submitting ? 'Analyzing Submission...' : 'Submit Examination'}
           </Button>

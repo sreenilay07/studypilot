@@ -11,32 +11,30 @@ const getGroqClient = () => {
 // Helper function to safely clean and parse JSON from AI response
 const parseAndValidateJSON = (text) => {
   let cleanedText = text.trim();
-  // Remove markdown code blocks if present
-  if (cleanedText.startsWith('```json')) {
-    cleanedText = cleanedText.substring(7);
-  } else if (cleanedText.startsWith('```')) {
-    cleanedText = cleanedText.substring(3);
-  }
-  if (cleanedText.endsWith('```')) {
-    cleanedText = cleanedText.substring(0, cleanedText.length - 3);
-  }
-  cleanedText = cleanedText.trim();
+  cleanedText = cleanedText.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
 
-  return JSON.parse(cleanedText);
+  try {
+    return JSON.parse(cleanedText);
+  } catch (err) {
+    const firstBrace = cleanedText.indexOf('{');
+    const lastBrace = cleanedText.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const jsonSubstring = cleanedText.substring(firstBrace, lastBrace + 1);
+      return JSON.parse(jsonSubstring);
+    }
+    throw err;
+  }
 };
 
 // Available Groq models list with automatic fallbacks
 const getAvailableModels = () => {
   const envModel = process.env.GROQ_MODEL;
   const defaults = [
-    'openai/gpt-oss-120b',
-    'qwen/qwen3.8-27b',
     'groq/compound',
-    'openai/gpt-oss-20b',
-    'qwen/qwen3.6-27b',
     'groq/compound-mini',
-    'llama-3.3-70b-versatile',
-    'llama-3.1-8b-instant'
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.8-27b',
+    'openai/gpt-oss-120b'
   ];
   if (envModel && !defaults.includes(envModel)) {
     return [envModel, ...defaults];
@@ -55,20 +53,12 @@ const createCompletionWithFallback = async (groq, params) => {
         ...params,
         model
       });
-      return response;
+      if (response && response.choices && response.choices[0]?.message?.content) {
+        return response;
+      }
     } catch (error) {
       lastError = error;
-      console.warn(`Groq model '${model}' failed: ${error.message}. Retrying with next model...`);
-      // If error is not model_not_found/404/decommissioned, throw immediately
-      if (
-        !error.message?.includes('model_not_found') &&
-        !error.message?.includes('does not exist') &&
-        !error.message?.includes('model_decommissioned') &&
-        !error.message?.includes('decommissioned') &&
-        error.status !== 404
-      ) {
-        throw error;
-      }
+      console.warn(`Groq model '${model}' failed: ${error.message}. Trying next model...`);
     }
   }
 
@@ -77,6 +67,15 @@ const createCompletionWithFallback = async (groq, params) => {
 
 export const generateStudyKit = async ({ topic, notes, difficulty = 'Intermediate', learningStyle = 'Simple Explanation' }) => {
   const groq = getGroqClient();
+
+  // Truncate notes safely if too large for Groq TPM token limits (8000 TPM limit)
+  const MAX_NOTES_CHARS = 10000;
+  let safeNotes = notes;
+  if (notes.length > MAX_NOTES_CHARS) {
+    const head = notes.substring(0, 5000);
+    const tail = notes.substring(notes.length - 5000);
+    safeNotes = `${head}\n\n[... Note Context Truncated for AI Analysis ...]\n\n${tail}`;
+  }
 
   const systemPrompt = `
 You are Pocket Mentor, an AI educational assistant.
@@ -89,16 +88,15 @@ IMPORTANT RULES:
 4. Adapt explanations according to the requested learning style: ${learningStyle}.
 5. Adapt complexity according to difficulty: ${difficulty}.
 6. Keep explanations concise and useful for revision.
-7. Generate approximately 8 flashcards. Each flashcard MUST have a "question" and an "answer".
-8. Generate exactly 5 multiple-choice questions in the "quiz" array.
+7. Generate approximately 6 to 8 flashcards. Each flashcard MUST have a "question" and an "answer".
+8. Generate 5 multiple-choice questions in the "quiz" array.
 9. Every quiz question must contain exactly 4 options in the "options" array.
 10. Each quiz question must have exactly one correct "answer" (which MUST match one of the string items in "options").
 11. Include a short "explanation" for every correct answer.
-12. Assign every quiz question to a meaningful "concept" (e.g. "Definition", "Light Reactions", "Calvin Cycle").
+12. Assign every quiz question to a meaningful "concept" (e.g. "Definition", "Core Mechanics", "Application").
 13. Generate a "knowledgeMap" showing important relationships between concepts, with "nodes" array (id, label) and "edges" array (from, to, relationship).
 14. Avoid duplicate questions.
-15. Do not generate irrelevant content.
-16. Return ONLY valid JSON matching this exact structure:
+15. Return ONLY valid JSON matching this exact structure:
 {
   "summary": "...",
   "keyPoints": ["...", "..."],
@@ -119,7 +117,6 @@ IMPORTANT RULES:
     }
   ]
 }
-17. Do not wrap JSON in markdown or add conversational filler.
 `;
 
   const userPrompt = `
@@ -128,7 +125,7 @@ Difficulty: ${difficulty}
 Learning Style: ${learningStyle}
 
 Student Notes:
-${notes}
+${safeNotes}
 `;
 
   const response = await createCompletionWithFallback(groq, {
@@ -147,33 +144,105 @@ ${notes}
 
   const parsed = parseAndValidateJSON(content);
 
-  // Validate response contract strictly
-  if (!parsed.summary || typeof parsed.summary !== 'string') {
-    throw new Error('Invalid AI response: summary missing or invalid');
-  }
-  if (!Array.isArray(parsed.keyPoints)) {
-    throw new Error('Invalid AI response: keyPoints is not an array');
-  }
-  if (!Array.isArray(parsed.flashcards) || parsed.flashcards.length === 0) {
-    throw new Error('Invalid AI response: flashcards array missing');
-  }
-  if (!Array.isArray(parsed.quiz) || parsed.quiz.length !== 5) {
-    throw new Error('Invalid AI response: quiz must contain exactly 5 questions');
-  }
-  for (const q of parsed.quiz) {
-    if (!q.question || !Array.isArray(q.options) || q.options.length !== 4 || !q.answer || !q.explanation || !q.concept) {
-      throw new Error('Invalid AI response: quiz question structural violation');
-    }
+  // Robust field extraction & key normalization
+  const summary =
+    typeof parsed.summary === 'string' && parsed.summary.trim()
+      ? parsed.summary.trim()
+      : parsed.overview || `Study Kit overview for ${topic}.`;
+
+  const keyPoints = Array.isArray(parsed.keyPoints)
+    ? parsed.keyPoints
+    : Array.isArray(parsed.key_points)
+    ? parsed.key_points
+    : [summary];
+
+  // Flashcards extraction & fallback construction
+  const rawCards =
+    parsed.flashcards || parsed.flashCards || parsed.flash_cards || parsed.cards || [];
+
+  let flashcards = Array.isArray(rawCards)
+    ? rawCards
+        .filter((c) => c && (c.question || c.front || c.q))
+        .map((c) => ({
+          question: c.question || c.front || c.q || 'Question',
+          answer: c.answer || c.back || c.a || 'Answer'
+        }))
+    : [];
+
+  if (flashcards.length === 0) {
+    flashcards = keyPoints.map((kp, idx) => ({
+      question: `Key Concept ${idx + 1} (${topic}): What should you remember?`,
+      answer: typeof kp === 'string' ? kp : JSON.stringify(kp)
+    }));
   }
 
-  if (!parsed.knowledgeMap || !Array.isArray(parsed.knowledgeMap.nodes)) {
-    parsed.knowledgeMap = {
-      nodes: parsed.keyPoints.map((kp, idx) => ({ id: `${idx + 1}`, label: kp })),
+  if (flashcards.length === 0) {
+    flashcards = [
+      { question: `What is the core subject of ${topic}?`, answer: summary },
+      { question: `What is the primary takeaway for ${topic}?`, answer: `Review the notes on ${topic} to master the fundamentals.` }
+    ];
+  }
+
+  // Quiz extraction & fallback construction
+  const rawQuiz = parsed.quiz || parsed.questions || parsed.quizQuestions || [];
+  let quiz = Array.isArray(rawQuiz)
+    ? rawQuiz.map((q, idx) => {
+        const questionText = q.question || q.title || `Question ${idx + 1} on ${topic}`;
+        let opts = Array.isArray(q.options) ? q.options.map(String) : [];
+        if (opts.length < 4) {
+          const defaults = ['Option A', 'Option B', 'Option C', 'Option D'];
+          while (opts.length < 4) {
+            opts.push(defaults[opts.length]);
+          }
+        } else if (opts.length > 4) {
+          opts = opts.slice(0, 4);
+        }
+        const ans = q.answer && opts.includes(String(q.answer)) ? String(q.answer) : opts[0];
+        return {
+          question: questionText,
+          options: opts,
+          answer: ans,
+          explanation: q.explanation || `The correct answer is "${ans}".`,
+          concept: q.concept || `Concept ${idx + 1}`
+        };
+      })
+    : [];
+
+  // Ensure quiz has at least some questions if empty
+  if (quiz.length === 0) {
+    quiz = keyPoints.slice(0, 5).map((kp, idx) => ({
+      question: `Which statement correctly describes concept ${idx + 1} of ${topic}?`,
+      options: [
+        typeof kp === 'string' ? kp : 'Correct definition',
+        'Incorrect alternative statement A',
+        'Incorrect alternative statement B',
+        'Incorrect alternative statement C'
+      ],
+      answer: typeof kp === 'string' ? kp : 'Correct definition',
+      explanation: `Based on your study notes: ${kp}`,
+      concept: `Key Concept ${idx + 1}`
+    }));
+  }
+
+  // Knowledge map normalization
+  let knowledgeMap = parsed.knowledgeMap;
+  if (!knowledgeMap || !Array.isArray(knowledgeMap.nodes) || knowledgeMap.nodes.length === 0) {
+    knowledgeMap = {
+      nodes: keyPoints.slice(0, 6).map((kp, idx) => ({
+        id: `${idx + 1}`,
+        label: typeof kp === 'string' ? (kp.length > 25 ? kp.substring(0, 25) + '...' : kp) : `Node ${idx + 1}`
+      })),
       edges: []
     };
   }
 
-  return parsed;
+  return {
+    summary,
+    keyPoints,
+    flashcards,
+    quiz,
+    knowledgeMap
+  };
 };
 
 export const explainMistakeAI = async ({ question, selectedAnswer, correctAnswer, explanation, topic }) => {

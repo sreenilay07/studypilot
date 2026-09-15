@@ -7,13 +7,9 @@ import { Link } from 'react-router-dom';
 
 export function AppShell({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [showAnimation, setShowAnimation] = useState(() => {
-    // Show animation if not played in current session
-    return !sessionStorage.getItem('studypilot_intro_played');
-  });
+  const [showAnimation, setShowAnimation] = useState(true);
 
   const handleAnimationComplete = () => {
-    sessionStorage.setItem('studypilot_intro_played', 'true');
     setShowAnimation(false);
   };
 

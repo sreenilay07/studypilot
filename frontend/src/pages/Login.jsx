@@ -15,12 +15,9 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const [showAnimation, setShowAnimation] = useState(() => {
-    return !sessionStorage.getItem('studypilot_intro_played');
-  });
+  const [showAnimation, setShowAnimation] = useState(true);
 
   const handleAnimationComplete = () => {
-    sessionStorage.setItem('studypilot_intro_played', 'true');
     setShowAnimation(false);
   };
 
