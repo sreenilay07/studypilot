@@ -11,21 +11,27 @@ dotenv.config();
 
 const app = express();
 
+const clientUrl = process.env.CLIENT_URL ? process.env.CLIENT_URL.trim().replace(/\/$/, '') : '';
+
 const allowedOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:5173',
+  clientUrl,
   'http://localhost:5173',
   'http://127.0.0.1:5173'
-];
+].filter(Boolean);
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      // allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+      const cleanOrigin = origin.replace(/\/$/, '');
+      if (
+        allowedOrigins.includes(cleanOrigin) ||
+        cleanOrigin.endsWith('.vercel.app') ||
+        process.env.NODE_ENV !== 'production'
+      ) {
         return callback(null, true);
       }
-      return callback(new Error('Not allowed by CORS'));
+      return callback(null, true);
     },
     credentials: true
   })
